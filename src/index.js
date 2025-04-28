@@ -1,5 +1,3 @@
-// Dependências: npm install express multer xml2js json2csv fs
-
 const express = require("express");
 const multer = require("multer");
 const xml2js = require("xml2js");
@@ -8,7 +6,8 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-const upload = multer({ dest: "uploads/" });
+// Use memory storage para evitar escrever diretamente no sistema de arquivos
+const upload = multer({ storage: multer.memoryStorage() });
 const port = 3000;
 
 // Função que extrai dados do XML convertido para JSON
@@ -91,32 +90,48 @@ function extractCSVData(json) {
 }
 
 app.post("/upload", upload.single("file"), (req, res) => {
-  const xmlPath = req.file.path;
+  const xmlData = req.file.buffer.toString(); // Get XML data from buffer
 
-  fs.readFile(xmlPath, "utf8", (err, xmlData) => {
-    if (err) return res.status(500).send("Erro ao ler o arquivo XML");
-
-    xml2js.parseString(
-      xmlData,
-      { explicitArray: true, ignoreAttributes: false, charsAsArray: false },
-      (err, jsonData) => {
-        // Added options for better parsing
-        if (err) return res.status(500).send("Erro ao converter XML para JSON");
-
-        const data = extractCSVData(jsonData);
-        const json2csvParser = new Parser();
-        const csv = json2csvParser.parse(data);
-
-        const outputPath = path.join(__dirname, "output.csv");
-        fs.writeFileSync(outputPath, csv);
-
-        res.download(outputPath, "convertido.csv", () => {
-          fs.unlinkSync(outputPath);
-          fs.unlinkSync(xmlPath);
-        });
+  xml2js.parseString(
+    xmlData,
+    { explicitArray: true, ignoreAttributes: false, charsAsArray: false },
+    (err, jsonData) => {
+      if (err) {
+        console.error("Erro ao converter XML para JSON:", err);
+        return res.status(500).send("Erro ao converter XML para JSON");
       }
-    );
-  });
+
+      const data = extractCSVData(jsonData);
+      const json2csvParser = new Parser();
+      const csv = json2csvParser.parse(data);
+
+      // Use /tmp for the output file
+      const tmpPath = path.join("/tmp", "output.csv");
+      fs.writeFileSync(tmpPath, csv);
+
+      // Set the content-disposition header to prompt download
+      res.setHeader(
+        "Content-disposition",
+        "attachment; filename=convertido.csv"
+      );
+      res.set("Content-Type", "text/csv"); //set the correct content type
+
+      // Stream the file directly to the response
+      const fileStream = fs.createReadStream(tmpPath);
+      fileStream.pipe(res);
+
+      // Clean up the temporary file after it has been sent
+      fileStream.on("end", () => {
+        fs.unlinkSync(tmpPath);
+      });
+
+      fileStream.on("error", (error) => {
+        console.error("Error streaming file:", error);
+        res.status(500).send("Error streaming file");
+        fs.unlinkSync(tmpPath); //cleanup
+      });
+    }
+  );
 });
 
 app.get("/", (req, res) => {
