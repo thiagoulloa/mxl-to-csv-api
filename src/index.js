@@ -119,6 +119,10 @@ app.post("/upload", upload.single("file"), (req, res) => {
   });
 });
 
+app.get("/", (req, res) => {
+  res.send("Olá");
+});
+
 app.listen(port, () => {
   console.log(`API rodando em http://localhost:${port}`);
 });
